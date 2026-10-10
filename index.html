@@ -1249,9 +1249,12 @@ function loadSkulpt() {
     skulptWaiters.push([res, rej]);
     if (skulptState === "loading") return;
     skulptState = "loading";
-    const add = src => new Promise((ok, bad) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = bad; document.head.appendChild(s); });
-    add("https://cdn.jsdelivr.net/npm/skulpt@1.2.0/dist/skulpt.min.js")
-      .then(() => add("https://cdn.jsdelivr.net/npm/skulpt@1.2.0/dist/skulpt-stdlib.js"))
+    const add = src => new Promise((ok, bad) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => { s.remove(); bad(); }; document.head.appendChild(s); });
+    // сначала своя копия рядом с сайтом (не зависит от чужих серверов), потом два CDN
+    const BASES = ["vendor/", "https://cdn.jsdelivr.net/npm/skulpt@1.2.0/dist/", "https://unpkg.com/skulpt@1.2.0/dist/"];
+    const tryFrom = i => i >= BASES.length ? Promise.reject(new Error("no skulpt"))
+      : add(BASES[i] + "skulpt.min.js").then(() => add(BASES[i] + "skulpt-stdlib.js")).catch(() => tryFrom(i + 1));
+    tryFrom(0)
       .then(() => { skulptState = "ready"; skulptWaiters.splice(0).forEach(w => w[0]()); document.dispatchEvent(new Event("skulpt-ready")); },
             e => { skulptState = "idle"; skulptWaiters.splice(0).forEach(w => w[1](e)); });
   });
@@ -1637,6 +1640,15 @@ function renderTask(t) {
       e.preventDefault(); const s = ed.selectionStart; const ls = ed.value.lastIndexOf("\n", s - 1) + 1;
       const line = ed.value.slice(ls, s); let ind = line.match(/^\s*/)[0]; if (/:\s*$/.test(line)) ind += "    ";
       ed.setRangeText("\n" + ind, s, ed.selectionEnd, "end"); ed.dispatchEvent(new Event("input"));
+    } else if (e.key === ":" && !e.ctrlKey) {
+      // else / elif / except / finally встают на уровень своего if или try
+      const s = ed.selectionStart, ls = ed.value.lastIndexOf("\n", s - 1) + 1, line = ed.value.slice(ls, s);
+      const open = (line.match(/[\[(]/g) || []).length, close = (line.match(/[\])]/g) || []).length;
+      if (open === close && /^ {4,}(else|elif\b.*|except\b.*|finally)$/.test(line)) {
+        e.preventDefault();
+        ed.setRangeText(line.slice(4) + ":", ls, ed.selectionEnd, "end");
+        ed.dispatchEvent(new Event("input"));
+      }
     } else if (e.key === "Enter" && e.ctrlKey) { e.preventDefault(); $("#submit").click(); }
   });
   drawReveal(t);
